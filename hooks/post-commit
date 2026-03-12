@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+# ==============================================================
+#  Commit Lock System — Post-Commit Hook
+#  Optionally auto-releases the lock after a commit.
+#
+#  Default: auto-release is OFF.
+#  Rationale: typical workflow is commit submodule(s) THEN
+#  commit parent repo — all under the same lock.
+#
+#  To enable auto-release:
+#    In ~/.commit-lock-config: export COMMIT_LOCK_AUTO_RELEASE="true"
+# ==============================================================
+
+# Load config files
+REPO_CONFIG="$(git rev-parse --show-toplevel 2>/dev/null)/.commit-lock-config"
+USER_CONFIG="$HOME/.commit-lock-config"
+
+if [ -f "$REPO_CONFIG" ]; then
+  # shellcheck source=/dev/null
+  source "$REPO_CONFIG"
+elif [ -f "$USER_CONFIG" ]; then
+  # shellcheck source=/dev/null
+  source "$USER_CONFIG"
+fi
+
+LOCK_SERVER="${COMMIT_LOCK_SERVER:-http://localhost:3000}"
+CURRENT_USER="${COMMIT_LOCK_USER:-$(whoami)}"
+AUTO_RELEASE="${COMMIT_LOCK_AUTO_RELEASE:-false}"
+
+if [ "${SKIP_LOCK_CHECK:-0}" = "1" ]; then
+  exit 0
+fi
+
+if [ "$AUTO_RELEASE" = "true" ]; then
+  curl -s --max-time 5 --connect-timeout 3 \
+    -X POST "${LOCK_SERVER}/release" \
+    -H "Content-Type: application/json" \
+    -d "{\"username\":\"${CURRENT_USER}\"}" > /dev/null 2>&1
+  echo "[commit-lock] Lock auto-released for ${CURRENT_USER}."
+else
+  echo ""
+  echo "[commit-lock] Reminder: Check Out when you are done with ALL commits."
+  echo "              Dashboard: ${LOCK_SERVER}"
+  echo ""
+fi
+
+exit 0

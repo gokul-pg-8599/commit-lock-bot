@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+
+# ==============================================================
+#  Commit Lock System — Pre-Commit Hook
+#  Blocks git commit unless the current user holds the lock.
+#
+#  Config (in order of priority):
+#    1. Repo-level:  <repo-root>/.commit-lock-config
+#    2. User-level:  ~/.commit-lock-config
+#    3. Environment variables
+#    4. Defaults
+#
+#  Bypass: SKIP_LOCK_CHECK=1 git commit -m "emergency fix"
+# ==============================================================
+
+# Load config files
+REPO_CONFIG="$(git rev-parse --show-toplevel 2>/dev/null)/.commit-lock-config"
+USER_CONFIG="$HOME/.commit-lock-config"
+
+if [ -f "$REPO_CONFIG" ]; then
+  # shellcheck source=/dev/null
+  source "$REPO_CONFIG"
+elif [ -f "$USER_CONFIG" ]; then
+  # shellcheck source=/dev/null
+  source "$USER_CONFIG"
+fi
+
+LOCK_SERVER="${COMMIT_LOCK_SERVER:-http://localhost:3000}"
+# Default: use git user.email (matches what Cliq sends) — zero-config for developers
+CURRENT_USER="${COMMIT_LOCK_USER:-$(git config user.email)}"
+REQUEST_TIMEOUT="${COMMIT_LOCK_TIMEOUT:-5}"
+
+# ── Bypass escape hatch ──────────────────────────────────────
+if [ "${SKIP_LOCK_CHECK:-0}" = "1" ]; then
+  echo "[commit-lock] WARNING: Lock check bypassed (SKIP_LOCK_CHECK=1)"
+  exit 0
+fi
+
+# ── Fetch lock status from server ───────────────────────────
+HTTP_RESPONSE=$(curl -s \
+  --max-time "$REQUEST_TIMEOUT" \
+  --connect-timeout 3 \
+  -w "\n__STATUS_CODE__%{http_code}" \
+  "${LOCK_SERVER}/status" 2>/dev/null)
+
+CURL_EXIT=$?
+HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed 's/__STATUS_CODE__[0-9]*$//')
+HTTP_CODE=$(echo "$HTTP_RESPONSE" | grep -o '__STATUS_CODE__[0-9]*' | sed 's/__STATUS_CODE__//')
+
+# ── Handle server unreachable ────────────────────────────────
+if [ "$CURL_EXIT" -ne 0 ] || [ -z "$HTTP_CODE" ] || [ "$HTTP_CODE" = "000" ]; then
+  echo ""
+  echo "┌─────────────────────────────────────────────────────┐"
+  echo "│         COMMIT LOCK — SERVER UNREACHABLE            │"
+  echo "├─────────────────────────────────────────────────────┤"
+  echo "│  Could not reach: ${LOCK_SERVER}"
+  echo "│                                                     │"
+  echo "│  Solutions:                                         │"
+  echo "│    1. Start the lock server and try again           │"
+  echo "│    2. Check COMMIT_LOCK_SERVER in ~/.commit-lock-config │"
+  echo "│    3. Emergency bypass: SKIP_LOCK_CHECK=1 git commit│"
+  echo "└─────────────────────────────────────────────────────┘"
+  echo ""
+  exit 1
+fi
+
+# ── Parse JSON response (no jq required) ─────────────────────
+# Extract "locked": true/false
+LOCKED=$(echo "$HTTP_BODY" | grep -o '"locked":[^,}]*' | head -1 | sed 's/.*://' | tr -d ' "')
+# Extract "holder": "username"
+HOLDER=$(echo "$HTTP_BODY" | grep -o '"holder":"[^"]*"' | head -1 | sed 's/"holder":"//' | tr -d '"')
+
+# ── Decision logic ────────────────────────────────────────────
+if [ "$LOCKED" = "false" ] || [ -z "$LOCKED" ]; then
+  echo ""
+  echo "┌─────────────────────────────────────────────────────┐"
+  echo "│         COMMIT LOCK — NOT CHECKED IN                │"
+  echo "├─────────────────────────────────────────────────────┤"
+  echo "│  You must Check In before committing.               │"
+  echo "│                                                     │"
+  echo "│  Run in Zoho Cliq:  /checkin [your message]          │"
+  echo "│                                                     │"
+  echo "│  Your email:  ${CURRENT_USER}                       │"
+  echo "└─────────────────────────────────────────────────────┘"
+  echo ""
+  exit 1
+fi
+
+if [ "$HOLDER" != "$CURRENT_USER" ]; then
+  echo ""
+  echo "┌─────────────────────────────────────────────────────┐"
+  echo "│         COMMIT LOCK — HELD BY ANOTHER               │"
+  echo "├─────────────────────────────────────────────────────┤"
+  echo "│  Lock is held by: ${HOLDER}                         │"
+  echo "│  Your username:   ${CURRENT_USER}                   │"
+  echo "│                                                     │"
+  echo "│  Wait for them to /checkout in Cliq, then /checkin. │"
+  echo "│                                                     │"
+  echo "│  Wrong email? Set COMMIT_LOCK_USER in               │"
+  echo "│  ~/.commit-lock-config to match your Cliq email.   │"
+  echo "└─────────────────────────────────────────────────────┘"
+  echo ""
+  exit 1
+fi
+
+# Lock is held by current user — allow commit
+echo "[commit-lock] Lock confirmed for ${CURRENT_USER}. Proceeding with commit."
+exit 0

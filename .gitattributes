@@ -1,0 +1,7 @@
+# Ensure hook scripts always have Unix (LF) line endings
+# regardless of the developer's core.autocrlf setting.
+# Windows line endings (\r\n) in bash scripts break execution.
+
+hooks/pre-commit         text eol=lf
+hooks/post-commit        text eol=lf
+hooks/install-hooks.sh   text eol=lf

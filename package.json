@@ -1,0 +1,16 @@
+{
+  "name": "commit-lock-system",
+  "version": "1.0.0",
+  "description": "Real-time commit lock system for teams using Git submodules",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node --watch server/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "port": 3000,
+  "cliqNotifyUrl": "https://cliq.zoho.in/api/v2/channelsbyname/YOUR_CHANNEL/message?zapikey=YOUR_ZAPIKEY",
+  "cliqEnabled": false,
+  "lockTimeoutMinutes": 30,
+  "autoReleaseOnTimeout": true,
+  "adminKey": "change-this-admin-key",
+  "stateFilePath": "./lock-state.json",
+  "historyFilePath": "./lock-history.json"
+}

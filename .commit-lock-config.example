@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# ============================================================
+#  Commit Lock System — Per-Developer Config
+#
+#  SETUP INSTRUCTIONS:
+#    1. Copy this file to your home directory:
+#         cp .commit-lock-config.example ~/.commit-lock-config
+#    2. Edit COMMIT_LOCK_SERVER with the deployed bot URL
+#    3. Add to your shell startup file (~/.bashrc or ~/.zshrc):
+#         source ~/.commit-lock-config
+#    4. Source it now: source ~/.commit-lock-config
+#
+#  NOTE: The lock uses your git user.email by default, which
+#  must match what Zoho Cliq sends for your account.
+#  If they differ, set COMMIT_LOCK_USER explicitly below.
+# ============================================================
+
+# Lock bot URL (deployed cloud URL, e.g. Railway/Render)
+export COMMIT_LOCK_SERVER="https://your-app.railway.app"
+
+# Only set this if your git email differs from your Cliq email.
+# Leave commented out to use git config user.email automatically.
+# export COMMIT_LOCK_USER="you@yourcompany.com"
+
+# Auto-release lock after EACH commit (true/false)
+# DEFAULT: false — keeps lock across multiple commits
+# (commit submodule A → submodule B → parent, all under one lock)
+export COMMIT_LOCK_AUTO_RELEASE="false"
+
+# Timeout for HTTP requests from the pre-commit hook (seconds)
+export COMMIT_LOCK_TIMEOUT="5"
