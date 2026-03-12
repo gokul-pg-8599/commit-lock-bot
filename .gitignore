@@ -1,6 +1,8 @@
 node_modules/
+functions/*/node_modules/
 server/lock-state.json
 server/lock-history.json
 *.log
 .env
 dashboard/
+.catalyst/

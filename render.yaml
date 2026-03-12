@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: commit-lock-bot
-    runtime: node
-    buildCommand: npm install
-    startCommand: node server/server.js
-    envVars:
-      - key: NODE_ENV
-        value: production
