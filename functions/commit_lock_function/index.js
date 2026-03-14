@@ -17,6 +17,17 @@ app.get('/', (req, res) => {
   res.json({ service: 'commit-lock-bot', status: 'running' });
 });
 
+// Debug endpoint — shows raw DataStore response for troubleshooting
+app.get('/debug', async (req, res) => {
+  try {
+    const catalystApp = catalyst.initialize(req);
+    const debug = await lockStore.debugDataStore(catalystApp);
+    res.json(debug);
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 app.get('/status', async (req, res) => {
   try {
     const catalystApp = catalyst.initialize(req);
@@ -115,6 +126,16 @@ app.post('/cliq/force', async (req, res) => {
 // ── Helper ─────────────────────────────────────────────────────────────────
 function extractUser(body) {
   return body?.user?.email || body?.user?.name || 'unknown';
+}
+
+// Catalyst loads this file as a module — it supplies its own listener.
+// When run directly with `node index.js` (local dev), start a plain HTTP server.
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`[commit-lock-bot] Local dev server running on http://localhost:${PORT}`);
+    console.log('Note: DataStore calls will fail locally (no Catalyst context). Use /status-mock for testing.');
+  });
 }
 
 module.exports = app;

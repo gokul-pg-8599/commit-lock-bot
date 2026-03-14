@@ -1,14 +1,7 @@
 {
-  "project_name": "commit-lock-bot",
-  "project_id": "YOUR_CATALYST_PROJECT_ID",
-  "project_key": "YOUR_CATALYST_PROJECT_KEY",
-  "functions": [
-    {
-      "name": "commit_lock_function",
-      "type": "Advanced IO",
-      "lang": "nodejs18",
-      "memory": 128,
-      "timeout": 10
-    }
-  ]
+  "functions": {
+    "targets": ["commit_lock_function"],
+    "ignore": [],
+    "source": "functions"
+  }
 }

@@ -1,11 +1,11 @@
 'use strict';
 
 // Lock state stored as a single row in Catalyst DataStore.
-// No persistent server or JSON file needed — works fully serverless.
+// Uses ZCQL for reads (predictable response format).
 //
 // DataStore table: CommitLock
 // Columns: locked, holder, since, commitMessage, queue, lastActivity
-// (All columns are String type in DataStore; booleans stored as "true"/"false")
+// (All columns are text type in DataStore; booleans stored as "true"/"false")
 
 const TABLE_NAME = 'CommitLock';
 
@@ -18,24 +18,41 @@ const DEFAULT_STATE = {
   lastActivity: null
 };
 
-// ── DataStore read/write ───────────────────────────────────────────────────
+// ── DataStore read/write via ZCQL ────────────────────────────────────────
 
 async function readRow(app) {
   try {
-    const rows = await app.datastore().table(TABLE_NAME).getRows();
-    if (!rows || rows.length === 0) return null;
-    const r = rows[0];
+    const zcql = app.zcql();
+    const result = await zcql.executeZCQLQuery(`SELECT * FROM ${TABLE_NAME} LIMIT 1`);
+    console.log('[lock-store] ZCQL raw result type:', typeof result, 'isArray:', Array.isArray(result));
+    console.log('[lock-store] ZCQL raw result:', JSON.stringify(result).substring(0, 1000));
+
+    // ZCQL returns array of objects keyed by table name: [ { CommitLock: { ... } } ]
+    let rows = result;
+    // Handle wrapped response { content: [...] } or { data: [...] }
+    if (!Array.isArray(result) && result && typeof result === 'object') {
+      rows = result.content || result.data || [];
+    }
+
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+
+    // Each row is { TableName: { col: val } }
+    const rowWrapper = rows[0];
+    const r = rowWrapper[TABLE_NAME] || rowWrapper.CommitLock || rowWrapper;
+
+    if (!r || !r.ROWID) return null;
+
     return {
-      ROWID: r.ROWID,
+      ROWID: String(r.ROWID),
       locked: r.locked === 'true',
-      holder: r.holder || null,
-      since: r.since || null,
-      commitMessage: r.commitMessage || null,
-      queue: r.queue ? JSON.parse(r.queue) : [],
-      lastActivity: r.lastActivity || null
+      holder: (r.holder && r.holder !== '') ? r.holder : null,
+      since: (r.since && r.since !== '') ? r.since : null,
+      commitMessage: (r.commitMessage && r.commitMessage !== '') ? r.commitMessage : null,
+      queue: (r.queue && r.queue !== '' && r.queue !== '[]') ? JSON.parse(r.queue) : [],
+      lastActivity: (r.lastActivity && r.lastActivity !== '') ? r.lastActivity : null
     };
   } catch (err) {
-    console.error('[lock-store] readRow failed:', err.message);
+    console.error('[lock-store] readRow ZCQL failed:', err.message, err.stack);
     return null;
   }
 }
@@ -50,14 +67,43 @@ async function writeRow(app, state) {
     queue: JSON.stringify(state.queue || []),
     lastActivity: state.lastActivity || ''
   };
-  if (state.ROWID) {
-    return table.updateRow({ ...rowData, ROWID: state.ROWID });
-  } else {
-    return table.insertRow(rowData);
+  console.log('[lock-store] writeRow ROWID:', state.ROWID, 'locked:', rowData.locked, 'holder:', rowData.holder);
+
+  try {
+    if (state.ROWID) {
+      const updated = await table.updateRow({ ...rowData, ROWID: String(state.ROWID) });
+      console.log('[lock-store] updateRow success, ROWID:', updated.ROWID);
+      return updated;
+    } else {
+      const inserted = await table.insertRow(rowData);
+      console.log('[lock-store] insertRow success, ROWID:', inserted.ROWID);
+      state.ROWID = String(inserted.ROWID);
+      return inserted;
+    }
+  } catch (err) {
+    console.error('[lock-store] writeRow failed:', err.message, err.stack);
+    throw err;
   }
 }
 
-// ── Timeout check (replaces setTimeout — works serverless) ─────────────────
+// ── Debug helper (exposed to /debug endpoint) ────────────────────────────
+
+async function debugDataStore(app) {
+  const results = {};
+  try {
+    const zcql = app.zcql();
+    const raw = await zcql.executeZCQLQuery(`SELECT * FROM ${TABLE_NAME}`);
+    results.zcql_type = typeof raw;
+    results.zcql_isArray = Array.isArray(raw);
+    results.zcql_raw = JSON.stringify(raw).substring(0, 2000);
+    results.zcql_keys = raw && typeof raw === 'object' ? Object.keys(raw) : 'N/A';
+  } catch (err) {
+    results.zcql_error = err.message;
+  }
+  return results;
+}
+
+// ── Timeout check (replaces setTimeout — works serverless) ───────────────
 
 function checkExpired(state) {
   const timeoutMin = parseInt(process.env.LOCK_TIMEOUT_MINUTES || '30');
@@ -66,7 +112,7 @@ function checkExpired(state) {
   return elapsedMin > timeoutMin;
 }
 
-// ── Public API ─────────────────────────────────────────────────────────────
+// ── Public API ───────────────────────────────────────────────────────────
 
 async function getStatus(app) {
   const timeoutMin = parseInt(process.env.LOCK_TIMEOUT_MINUTES || '30');
@@ -74,7 +120,6 @@ async function getStatus(app) {
 
   let autoReleasedHolder = null;
 
-  // Auto-release expired lock on every read (no server-side timer needed)
   if (checkExpired(state)) {
     autoReleasedHolder = state.holder;
     state.locked = false;
@@ -102,7 +147,7 @@ async function getStatus(app) {
     timeHeldMinutes: parseFloat(timeHeldMin.toFixed(2)),
     timeRemainingMinutes: parseFloat(timeRemainingMin.toFixed(2)),
     lockTimeoutMinutes: timeoutMin,
-    _autoReleasedHolder: autoReleasedHolder  // stripped before sending to client
+    _autoReleasedHolder: autoReleasedHolder
   };
 }
 
@@ -114,7 +159,6 @@ async function acquireLock(app, username, commitMessage) {
   const state = (await readRow(app)) || { ...DEFAULT_STATE };
   const now = new Date().toISOString();
 
-  // Treat expired lock as free
   if (checkExpired(state)) {
     state.locked = false;
     state.holder = null;
@@ -127,7 +171,6 @@ async function acquireLock(app, username, commitMessage) {
   }
 
   if (state.locked) {
-    // Add to queue if not already there
     if (!state.queue) state.queue = [];
     if (!state.queue.some(q => q.user === username)) {
       state.queue.push({ user: username, requestedAt: now });
@@ -143,7 +186,6 @@ async function acquireLock(app, username, commitMessage) {
     };
   }
 
-  // Free — acquire it
   state.locked = true;
   state.holder = username;
   state.since = now;
@@ -178,10 +220,9 @@ async function releaseLock(app, username, forced) {
   state.since = null;
   state.commitMessage = null;
   state.lastActivity = new Date().toISOString();
-  // Keep queue intact — next person runs /checkin themselves
   await writeRow(app, state);
 
   return { success: true, durationMinutes, nextInQueue, releasedHolder };
 }
 
-module.exports = { getStatus, acquireLock, releaseLock };
+module.exports = { getStatus, acquireLock, releaseLock, debugDataStore };

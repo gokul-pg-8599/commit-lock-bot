@@ -6,3 +6,5 @@ server/lock-history.json
 .env
 dashboard/
 .catalyst/
+.catalystrc
+_backup_function/

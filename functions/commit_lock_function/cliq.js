@@ -110,36 +110,27 @@ function statusCard(status) {
   }
 
   const queueList = (status.queue || []).length > 0
-    ? status.queue.map((q, i) => `${i + 1}. ${q.user}`).join('\n')
-    : 'Nobody waiting';
+    ? status.queue.map((q, i) => `  ${i + 1}. ${q.user}`).join('\n')
+    : '  Nobody waiting';
 
-  const timeoutAt = status.since
-    ? new Date(new Date(status.since).getTime() + status.lockTimeoutMinutes * 60000).toISOString()
+  const sinceStr = status.since
+    ? new Date(status.since).toLocaleString()
     : 'N/A';
 
-  return {
-    text: '🔴 *Commit lock is HELD*',
-    card: { title: 'Commit Lock Status', theme: 'modern-inline' },
-    slides: [
-      {
-        type: 'table',
-        data: {
-          headers: ['Field', 'Value'],
-          rows: [
-            ['Held by', status.holder || ''],
-            ['Since', status.since ? new Date(status.since).toLocaleString() : ''],
-            ['Commit message', status.commitMessage || '—'],
-            ['Time held', `${status.timeHeldMinutes} min`],
-            ['Auto-releases in', `${status.timeRemainingMinutes} min (at ${timeoutAt})`]
-          ]
-        }
-      },
-      {
-        type: 'text',
-        data: { text: `*Queue:*\n${queueList}` }
-      }
-    ]
-  };
+  const text = [
+    '🔴 *Commit lock is HELD*',
+    '',
+    `*Held by:* ${status.holder}`,
+    `*Since:* ${sinceStr}`,
+    `*Commit message:* ${status.commitMessage || '—'}`,
+    `*Time held:* ${status.timeHeldMinutes} min`,
+    `*Auto-releases in:* ${status.timeRemainingMinutes} min`,
+    '',
+    `*Queue:*`,
+    queueList
+  ].join('\n');
+
+  return { text };
 }
 
 module.exports = {
